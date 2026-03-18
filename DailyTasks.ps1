@@ -1,66 +1,87 @@
-# PowerShell скрипт для автоматизации ежедневных задач
-# Сохраните этот файл как DailyTasks.ps1
+﻿# DailyTasks.ps1 - Скрипт автоматизации ежедневных задач (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# Кодировка: UTF-8 with BOM
 
-# ==================== НАСТРОЙКИ ====================
+param(
+    [string]$TorrentPath = "D:\Downloads" # ИЗМЕНИТЕ ЭТОТ ПУТЬ НА ВАШ
+)
+
 $sourceFile = "C:\Users\Nebelung\Documents\Finance.icash"
-$destinationFolder = "D:\YandexDisk\Архив\iCash\"
-$torrentFolder = "C:\Users\Nebelung\Downloads" # Укажите вашу папку с торрентами
-# ===================================================
+$destFolder = "d:\YandexDisk\Архив\iCash"
+$logFile = "D:\Downloads\Automation-main\tasks_log.txt"
 
-Write-Host "=== Начало выполнения задач ===" -ForegroundColor Green
-Write-Host "Дата и время: $(Get-Date)" -ForegroundColor Cyan
+function Write-Log {
+    param([string]$Message, [string]$Color = "White")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp] $Message"
+    
+    Add-Content -Path $logFile -Value $logEntry -Encoding UTF8
+    
+    if ($Color -eq "Red") { Write-Host $logEntry -ForegroundColor Red }
+    elseif ($Color -eq "Green") { Write-Host $logEntry -ForegroundColor Green }
+    elseif ($Color -eq "Cyan") { Write-Host $logEntry -ForegroundColor Cyan }
+    else { Write-Host $logEntry }
+}
 
-# ==================== ЗАДАЧА 1: Копирование файла iCash ====================
-Write-Host "`n[Задача 1] Копирование файла Finance.icash..." -ForegroundColor Yellow
+Write-Log "=== Начало выполнения задач ===" "Cyan"
 
+# Задача 1: Копирование файла iCash
 try {
     if (Test-Path $sourceFile) {
-        # Создаем папку назначения, если она не существует
-        if (-not (Test-Path $destinationFolder)) {
-            New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
-            Write-Host "Папка назначения создана: $destinationFolder" -ForegroundColor Gray
+        if (-not (Test-Path $destFolder)) {
+            New-Item -ItemType Directory -Force -Path $destFolder | Out-Null
+            Write-Log "Папка назначения создана: $destFolder" "Green"
         }
-        
-        # Формируем имя файла с датой для архивации
-        $dateStamp = Get-Date -Format "yyyy-MM-dd_HH-mm"
+
+        $dateStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $fileName = [System.IO.Path]::GetFileName($sourceFile)
-        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($sourceFile)
-        $extension = [System.IO.Path]::GetExtension($sourceFile)
-        $destinationFile = "$destinationFolder\$baseName`_$dateStamp$extension"
-        
-        # Копируем файл
-        Copy-Item -Path $sourceFile -Destination $destinationFile -Force
-        Write-Host "✓ Файл успешно скопирован: $destinationFile" -ForegroundColor Green
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+        $extension = [System.IO.Path]::GetExtension($fileName)
+        $destFile = Join-Path $destFolder "${baseName}_${dateStamp}${extension}"
+
+        Copy-Item -Path $sourceFile -Destination $destFile -Force
+        Write-Log "Файл успешно скопирован: $destFile" "Green"
     } else {
-        Write-Host "⚠ Исходный файл не найден: $sourceFile" -ForegroundColor Red
+        Write-Log "Исходный файл не найден: $sourceFile" "Red"
     }
 } catch {
-    Write-Host "✗ Ошибка при копировании файла: $_" -ForegroundColor Red
+    Write-Log "Ошибка при копировании файла: $($_.Exception.Message)" "Red"
 }
 
-# ==================== ЗАДАЧА 2: Удаление .torrent файлов ====================
-Write-Host "`n[Задача 2] Удаление файлов .torrent из $torrentFolder..." -ForegroundColor Yellow
-
+# Задача 2: Удаление .torrent файлов (ИСПРАВЛЕНО)
 try {
-    if (Test-Path $torrentFolder) {
-        # Находим все .torrent файлы
-        $torrentFiles = Get-ChildItem -Path $torrentFolder -Filter "*.torrent" -File
+    if (Test-Path $TorrentPath) {
+        # Получаем список файлов
+        $torrentFiles = Get-ChildItem -Path $TorrentPath -Filter "*.torrent" -File -ErrorAction SilentlyContinue
         
         if ($torrentFiles.Count -gt 0) {
+            Write-Log "Найдено файлов .torrent: $($torrentFiles.Count). Начинаем удаление..." "Cyan"
+            $deletedCount = 0
+            
             foreach ($file in $torrentFiles) {
-                Remove-Item -Path $file.FullName -Force
-                Write-Host "✓ Удален: $($file.Name)" -ForegroundColor Gray
+                try {
+                    # ИСПОЛЬЗУЕМ -LiteralPath для корректной обработки спецсимволов в имени файла
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    
+                    # Двойная проверка удаления
+                    if (-not (Test-Path -LiteralPath $file.FullName)) {
+                        Write-Log "Успешно удален: $($file.FullName)" "Green"
+                        $deletedCount++
+                    } else {
+                        Write-Log "НЕ УДАЛЕНО (файл остался): $($file.FullName)" "Red"
+                    }
+                } catch {
+                    Write-Log "Ошибка удаления $($file.Name): $($_.Exception.Message)" "Red"
+                }
             }
-            Write-Host "✓ Удалено файлов: $($torrentFiles.Count)" -ForegroundColor Green
+            Write-Log "Всего удалено файлов: $deletedCount из $($torrentFiles.Count)" "Cyan"
         } else {
-            Write-Host "ℹ Файлы .torrent не найдены" -ForegroundColor Cyan
+            Write-Log "Файлы .torrent не найдены в папке: $TorrentPath" "Cyan"
         }
     } else {
-        Write-Host "⚠ Папка с торрентами не найдена: $torrentFolder" -ForegroundColor Red
+        Write-Log "Папка для поиска .torrent не найдена: $TorrentPath" "Red"
     }
 } catch {
-    Write-Host "✗ Ошибка при удалении файлов .torrent: $_" -ForegroundColor Red
+    Write-Log "Критическая ошибка при удалении .torrent файлов: $($_.Exception.Message)" "Red"
 }
 
-Write-Host "`n=== Выполнение задач завершено ===" -ForegroundColor Green
-Write-Host "Дата и время: $(Get-Date)" -ForegroundColor Cyan
+Write-Log "=== Завершение выполнения задач ===" "Cyan"
