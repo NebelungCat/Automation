@@ -33,60 +33,27 @@ try {
             New-Item -ItemType Directory -Force -Path $destFolder | Out-Null
         }
 
-        # Создаем временную папку для чистого копирования
         $tempFolder = Join-Path $env:TEMP "iCashBackup_$(Get-Random)"
         New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
         
-        # Копируем файл во временную папку
-        $fileName = Split-Path $sourceFile -Leaf
-        $tempFile = Join-Path $tempFolder $fileName
+        $tempFile = Join-Path $tempFolder (Split-Path $sourceFile -Leaf)
         Copy-Item -Path $sourceFile -Destination $tempFile -Force
         
-        # Формируем имя и путь архива
         $dateStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $archiveName = "Finance_${dateStamp}.rar"
         $archivePath = Join-Path $destFolder $archiveName
 
-        # Аргументы для WinRAR:
-        # a - добавить
-        # -p"пароль" - установка пароля
-        # -ibck - работать в фоне (скрыто)
-        # -ep1 - исключить базовую папку из имен (важно!)
-        # -y - отвечать Yes на все запросы
-        # -m5 - максимальное сжатие
-        $argsList = @(
-            "a",
-            "-p`"$password`"",
-            "-ibck",
-            "-ep1", 
-            "-y",
-            "-m5",
-            "`"$archivePath`"",
-            "`"$fileName`""
-        )
-
-        # Запускаем WinRAR из временной папки, чтобы в архив попало только имя файла
-        $procInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $procInfo.FileName = $winRarPath
-        $procInfo.Arguments = ($argsList -join " ")
-        $procInfo.WorkingDirectory = $tempFolder
-        $procInfo.UseShellExecute = $false
-        $procInfo.CreateNoWindow = $true
-        $procInfo.RedirectStandardOutput = $true
-        $procInfo.RedirectStandardError = $true
+        # Ключ -ep3 исключает пути полностью, -ibck скрывает окно
+        $rarArgs = "a", "-p$password", "-ibck", "-ep3", "-y", "`"$archivePath`"", "`"$tempFile`""
         
-        $process = [System.Diagnostics.Process]::Start($procInfo)
-        $process.WaitForExit()
-
-        # Небольшая задержка для завершения записи на диск
-        Start-Sleep -Seconds 1
+        Start-Process -FilePath $winRarPath -ArgumentList $rarArgs -Wait -NoNewWindow
+        Start-Sleep -Seconds 2
 
         if (Test-Path $archivePath) {
             Write-Log "Архив успешно создан: $archiveName" "Green"
-            # Удаляем временную папку
             Remove-Item -Path $tempFolder -Recurse -Force
         } else {
-            Write-Log "Ошибка: Архив не был создан после завершения процесса." "Red"
+            Write-Log "Ошибка: Архив не был создан." "Red"
             Remove-Item -Path $tempFolder -Recurse -Force
         }
     } else {
@@ -94,22 +61,32 @@ try {
     }
 } catch {
     Write-Log "Ошибка при работе с iCash: $($_.Exception.Message)" "Red"
-    if (Test-Path $tempFolder) { Remove-Item -Path $tempFolder -Recurse -Force }
 }
 
 # Задача 2: Удаление .torrent файлов
 try {
     if (Test-Path $TorrentPath) {
-        $torrentFiles = Get-ChildItem -Path $TorrentPath -Filter "*.torrent" -File
+        # Получаем список файлов
+        $torrentFiles = Get-ChildItem -Path $TorrentPath -Filter "*.torrent" -File -ErrorAction SilentlyContinue
+        
         if ($torrentFiles.Count -gt 0) {
+            Write-Log "Найдено файлов .torrent: $($torrentFiles.Count). Начинаем удаление..." "Cyan"
+            
             $deletedCount = 0
             foreach ($file in $torrentFiles) {
                 try {
-                    Remove-Item -Path $file.FullName -Force -ErrorAction Stop
-                    Write-Log "Удален файл: $($file.Name)" "Green"
-                    $deletedCount++
+                    # Используем конвейер для надежного удаления файлов со спецсимволами
+                    $file | Remove-Item -Force -ErrorAction Stop
+                    
+                    # Проверка: действительно ли файл удален
+                    if (-not (Test-Path $file.FullName)) {
+                        Write-Log "Удален файл: $($file.Name)" "Green"
+                        $deletedCount++
+                    } else {
+                        Write-Log "Не удалось удалить (файл остался): $($file.Name)" "Red"
+                    }
                 } catch {
-                    Write-Log "Не удалось удалить $($file.Name): $($_.Exception.Message)" "Red"
+                    Write-Log "Ошибка при удалении $($file.Name): $($_.Exception.Message)" "Red"
                 }
             }
             Write-Log "Всего удалено файлов: $deletedCount из $($torrentFiles.Count)" "Cyan"
