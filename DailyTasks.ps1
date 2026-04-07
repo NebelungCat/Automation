@@ -7,7 +7,7 @@ param(
 
 $sourceFile = "C:\Users\Nebelung\Documents\Finance.icash"
 $destFolder = "d:\YandexDisk\Архив\iCash"
-$logFile = "D:\Downloads\Automation-main\tasks_log.txt"
+$logFile = "c:\Users\Nebelung\Documents\GitHub\Automation\tasks_log.txt"
 $winRarPath = "C:\Program Files\WinRAR\WinRAR.exe"
 $password = "AlexCas@12"
 
