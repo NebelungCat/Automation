@@ -1,5 +1,5 @@
 ﻿# DailyTasks.ps1 - Скрипт автоматизации ежедневных задач
-# Кодировка: UTF-8 with BOM
+# Путь проекта: c:\Users\Nebelung\Documents\GitHub\Automation\
 
 param(
     [string]$TorrentPath = "D:\Downloads"
@@ -16,8 +16,13 @@ function Write-Log {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logEntry = "[$timestamp] $Message"
     
+    # Создаем папку для лога если нет
+    $logDir = Split-Path $logFile -Parent
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
+
     Add-Content -Path $logFile -Value $logEntry -Encoding UTF8
     
+    # Вывод в консоль (если запущено не скрытно, цвета не видны, но текст пишется)
     if ($Color -eq "Red") { Write-Host $logEntry -ForegroundColor Red }
     elseif ($Color -eq "Green") { Write-Host $logEntry -ForegroundColor Green }
     elseif ($Color -eq "Cyan") { Write-Host $logEntry -ForegroundColor Cyan }
@@ -33,28 +38,53 @@ try {
             New-Item -ItemType Directory -Force -Path $destFolder | Out-Null
         }
 
+        # Создаем временную папку ТОЛЬКО для этого файла
         $tempFolder = Join-Path $env:TEMP "iCashBackup_$(Get-Random)"
         New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
         
-        $tempFile = Join-Path $tempFolder (Split-Path $sourceFile -Leaf)
+        # Копируем файл внутрь временной папки
+        $fileName = Split-Path $sourceFile -Leaf
+        $tempFile = Join-Path $tempFolder $fileName
         Copy-Item -Path $sourceFile -Destination $tempFile -Force
         
+        # Формируем имя архива
         $dateStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $archiveName = "Finance_${dateStamp}.rar"
         $archivePath = Join-Path $destFolder $archiveName
 
-        # Ключ -ep3 исключает пути полностью, -ibck скрывает окно
-        $rarArgs = "a", "-p$password", "-ibck", "-ep3", "-y", "`"$archivePath`"", "`"$tempFile`""
+        # Аргументы для WinRAR:
+        # a - добавить
+        # -p"password" - пароль
+        # -ibck - фон (без окна)
+        # -y - отвечать "да" на все вопросы
+        # ВАЖНО: Мы запускаем команду ИЗ папки $tempFolder, поэтому указываем только имя файла.
+        # Это гарантирует, что внутри архива будет только файл, без путей.
+        $rarArgs = "a -p`"$password`" -ibck -y `"$archivePath`" `"$fileName`""
         
-        Start-Process -FilePath $winRarPath -ArgumentList $rarArgs -Wait -NoNewWindow
-        Start-Sleep -Seconds 2
+        # Запускаем WinRAR, предварительно меняя рабочую директорию
+        $procInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $procInfo.FileName = $winRarPath
+        $procInfo.Arguments = $rarArgs
+        $procInfo.WorkingDirectory = $tempFolder
+        $procInfo.UseShellExecute = $false
+        $procInfo.CreateNoWindow = $true
+        $procInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $procInfo
+        $process.Start() | Out-Null
+        $process.WaitForExit()
+
+        # Небольшая задержка для надежности записи на диск
+        Start-Sleep -Seconds 1
 
         if (Test-Path $archivePath) {
             Write-Log "Архив успешно создан: $archiveName" "Green"
-            Remove-Item -Path $tempFolder -Recurse -Force
+            # Удаляем временную папку
+            Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
         } else {
             Write-Log "Ошибка: Архив не был создан." "Red"
-            Remove-Item -Path $tempFolder -Recurse -Force
+            Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
         }
     } else {
         Write-Log "Исходный файл не найден: $sourceFile" "Red"
@@ -66,27 +96,19 @@ try {
 # Задача 2: Удаление .torrent файлов
 try {
     if (Test-Path $TorrentPath) {
-        # Получаем список файлов
+        # Получаем список файлов явно
         $torrentFiles = Get-ChildItem -Path $TorrentPath -Filter "*.torrent" -File -ErrorAction SilentlyContinue
         
         if ($torrentFiles.Count -gt 0) {
-            Write-Log "Найдено файлов .torrent: $($torrentFiles.Count). Начинаем удаление..." "Cyan"
-            
             $deletedCount = 0
             foreach ($file in $torrentFiles) {
                 try {
-                    # Используем конвейер для надежного удаления файлов со спецсимволами
-                    $file | Remove-Item -Force -ErrorAction Stop
-                    
-                    # Проверка: действительно ли файл удален
-                    if (-not (Test-Path $file.FullName)) {
-                        Write-Log "Удален файл: $($file.Name)" "Green"
-                        $deletedCount++
-                    } else {
-                        Write-Log "Не удалось удалить (файл остался): $($file.Name)" "Red"
-                    }
+                    # Используем LiteralPath для обработки спецсимволов в именах
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    Write-Log "Удален файл: $($file.Name)" "Green"
+                    $deletedCount++
                 } catch {
-                    Write-Log "Ошибка при удалении $($file.Name): $($_.Exception.Message)" "Red"
+                    Write-Log "Не удалось удалить $($file.Name): $($_.Exception.Message)" "Red"
                 }
             }
             Write-Log "Всего удалено файлов: $deletedCount из $($torrentFiles.Count)" "Cyan"
